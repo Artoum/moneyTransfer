@@ -1,20 +1,34 @@
 package main
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 type User struct {
-	Id      int
+	Id      string
 	Name    string
 	Balance float64
 }
 
-func (u *User) deposit(amount float64) {
+type Transaction struct {
+	FromID string
+	ToID   string
+	Amount float64
+}
+
+type PaymentSystem struct {
+	Users            map[string]*User
+	TransactionQueue []Transaction
+}
+
+func (u *User) Deposit(amount float64) {
 	u.Balance += amount
 	fmt.Printf("Баланс пользователя %v успешно пополнен на %.2f \nНа счету у %v: %.2f \n",
 		u.Name, amount, u.Name, u.Balance)
 }
 
-func (u *User) withdraw(amount float64) error {
+func (u *User) Withdraw(amount float64) error {
 	if u.Balance < amount {
 		return fmt.Errorf("У пользователя %v недостаточно средств для снятия или перевода.", u.Name)
 	}
@@ -25,23 +39,67 @@ func (u *User) withdraw(amount float64) error {
 	return nil
 }
 
+func (ps *PaymentSystem) AddUser(user *User) error {
+	if user == nil {
+		return errors.New("user cannot be nil")
+	}
+
+	if ps.Users == nil {
+		ps.Users = make(map[string]*User)
+	}
+
+	ps.Users[user.Id] = user
+	return nil
+}
+
+func (ps *PaymentSystem) AddTransaction(t Transaction) {
+	if ps.TransactionQueue == nil {
+		ps.TransactionQueue = make([]Transaction, 0)
+	}
+
+	ps.TransactionQueue = append(ps.TransactionQueue, t)
+}
+
+func (ps *PaymentSystem) ProcessingTransactions() error {
+	for _, t := range ps.TransactionQueue {
+		fromUser, exists := ps.Users[t.FromID]
+		if !exists {
+			return fmt.Errorf("пользователь %s не найден", t.FromID)
+		}
+		err := fromUser.Withdraw(t.Amount)
+		if err != nil {
+			return fmt.Errorf("Ошибка списания у %s %w: ", t.FromID, err)
+		}
+
+		toUser, exists := ps.Users[t.ToID]
+		if !exists {
+			return fmt.Errorf("пользователь %s не найден", t.ToID)
+		}
+		toUser.Deposit(t.Amount)
+	}
+	ps.TransactionQueue = []Transaction{}
+	return nil
+}
+
 func main() {
-	many := []*User{}
-
-	alice := User{101, "Alice", 0}
-	tom := User{102, "Tom", 0}
-
-	many = append(many, &alice, &tom)
-
-	alice.deposit(1000)
-	tom.deposit(1500)
-
-	err := alice.withdraw(1500)
-	if err != nil {
-		fmt.Println("Ошибка: ", err)
+	ps := &PaymentSystem{
+		Users:            make(map[string]*User),
+		TransactionQueue: []Transaction{},
 	}
-	err = tom.withdraw(1000)
-	if err != nil {
-		fmt.Println("Ошибка: ", err)
+
+	user1 := User{Id: "1", Name: "Alice", Balance: 1000}
+	user2 := User{Id: "2", Name: "Bob", Balance: 500}
+
+	ps.AddUser(&user1)
+	ps.AddUser(&user2)
+
+	ps.AddTransaction(Transaction{FromID: "1", ToID: "2", Amount: 200})
+	ps.AddTransaction(Transaction{FromID: "2", ToID: "1", Amount: 50})
+
+	if err := ps.ProcessingTransactions(); err != nil {
+		fmt.Println("Ошибка обработки", err)
 	}
+
+	fmt.Printf("Баланс %v: %.2f\n", user1.Name, user1.Balance)
+	fmt.Printf("Баланс %v: %.2f\n", user2.Name, user2.Balance)
 }
