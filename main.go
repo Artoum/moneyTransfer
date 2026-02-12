@@ -10,6 +10,7 @@ type User struct {
 	Id      string
 	Name    string
 	Balance float64
+	mu      sync.Mutex
 }
 
 type Transaction struct {
@@ -24,12 +25,18 @@ type PaymentSystem struct {
 }
 
 func (u *User) Deposit(amount float64) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
 	u.Balance += amount
 	fmt.Printf("Баланс пользователя %v успешно пополнен на %.2f \nНа счету у %v: %.2f \n",
 		u.Name, amount, u.Name, u.Balance)
 }
 
 func (u *User) Withdraw(amount float64) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
 	if u.Balance < amount {
 		return fmt.Errorf("У пользователя %v недостаточно средств для снятия или перевода.", u.Name)
 	}
