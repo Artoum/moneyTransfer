@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"sync"
 )
 
 type User struct {
@@ -60,25 +61,29 @@ func (ps *PaymentSystem) AddTransaction(t Transaction) {
 	ps.TransactionQueue = append(ps.TransactionQueue, t)
 }
 
-func (ps *PaymentSystem) ProcessingTransactions() error {
-	for _, t := range ps.TransactionQueue {
-		fromUser, exists := ps.Users[t.FromID]
-		if !exists {
-			return fmt.Errorf("пользователь %s не найден", t.FromID)
-		}
-		err := fromUser.Withdraw(t.Amount)
-		if err != nil {
-			return fmt.Errorf("Ошибка списания у %s %w: ", t.FromID, err)
-		}
-
-		toUser, exists := ps.Users[t.ToID]
-		if !exists {
-			return fmt.Errorf("пользователь %s не найден", t.ToID)
-		}
-		toUser.Deposit(t.Amount)
+func (ps *PaymentSystem) ProcessTransactions(t Transaction) error {
+	fromUser, exists := ps.Users[t.FromID]
+	if !exists {
+		return fmt.Errorf("пользователь %s не найден", t.FromID)
 	}
-	ps.TransactionQueue = []Transaction{}
+	err := fromUser.Withdraw(t.Amount)
+	if err != nil {
+		return fmt.Errorf("Ошибка списания у %s %w: ", t.FromID, err)
+	}
+
+	toUser, exists := ps.Users[t.ToID]
+	if !exists {
+		return fmt.Errorf("пользователь %s не найден", t.ToID)
+	}
+	toUser.Deposit(t.Amount)
 	return nil
+}
+
+func (ps *PaymentSystem) Worker(ch <-chan Transaction, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for t := range ch {
+		ps.ProcessTransactions(t)
+	}
 }
 
 func main() {
@@ -86,6 +91,9 @@ func main() {
 		Users:            make(map[string]*User),
 		TransactionQueue: []Transaction{},
 	}
+
+	var wg sync.WaitGroup
+	ch := make(chan Transaction, len(ps.TransactionQueue))
 
 	user1 := User{Id: "1", Name: "Alice", Balance: 1000}
 	user2 := User{Id: "2", Name: "Bob", Balance: 500}
@@ -96,9 +104,18 @@ func main() {
 	ps.AddTransaction(Transaction{FromID: "1", ToID: "2", Amount: 200})
 	ps.AddTransaction(Transaction{FromID: "2", ToID: "1", Amount: 50})
 
-	if err := ps.ProcessingTransactions(); err != nil {
-		fmt.Println("Ошибка обработки", err)
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go ps.Worker(ch, &wg)
 	}
+
+	for _, t := range ps.TransactionQueue {
+		ch <- t
+	}
+	close(ch)
+	wg.Wait()
+
+	ps.TransactionQueue = []Transaction{}
 
 	fmt.Printf("Баланс %v: %.2f\n", user1.Name, user1.Balance)
 	fmt.Printf("Баланс %v: %.2f\n", user2.Name, user2.Balance)
